@@ -7,8 +7,8 @@ import swaggerUI from "@fastify/swagger-ui";
 import dotenv from "dotenv";
 
 import authRoutes from "./modules/auth/auth.routes";
-import usuarioRoutes from "./modules/usuarios/usuario.routes";
-import servicoRoutes from "./modules/servicos/servico.routes";
+import usuarioRoutes from "./modules/usuarios/usuarios.routes";
+import servicoRoutes from "./modules/servicos/servicos.routes";
 
 dotenv.config();
 
