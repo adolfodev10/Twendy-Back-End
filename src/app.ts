@@ -3,7 +3,6 @@ import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
-import cors from "cors";
 import * as dotenv from "dotenv";
 
 import authRoutes from "./modules/auth/auth.routes";
