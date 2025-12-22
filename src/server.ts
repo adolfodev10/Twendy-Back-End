@@ -1,7 +1,58 @@
+import * as dotenv from 'dotenv';
 import app from "./app";
 
+// Carregar variáveis de ambiente de forma explícita
+const envResult = dotenv.config();
+
+// Verificar se carregou corretamente
+if (envResult.error) {
+  console.error('❌ ERRO: Falha ao carregar arquivo .env');
+  console.error('Detalhes:', envResult.error);
+  
+  // Tentar carregar sem caminho específico
+  console.log('🔄 Tentando carregar .env do diretório atual...');
+  dotenv.config();
+}
+
+// DEBUG: Verificar se as variáveis estão carregadas
+console.log('🔍 Verificando variáveis de ambiente:');
+console.log('   PORT:', process.env.PORT);
+console.log('   JWT_SECRET:', process.env.JWT_SECRET ? '*** (disponível)' : '❌ NÃO ENCONTRADO');
+console.log('   NODE_ENV:', process.env.NODE_ENV);
+
+// Verificar variáveis críticas
+if (!process.env.JWT_SECRET) {
+  console.error('❌ ERRO CRÍTICO: JWT_SECRET não está definido!');
+  console.error('   Certifique-se de que o arquivo .env existe na raiz do projeto');
+  console.error('   Verifique se JWT_SECRET está definido no arquivo .env');
+  console.error('   Exemplo: JWT_SECRET="seu_segredo_aqui"');
+  process.exit(1);
+}
+
+// Usar porta do .env ou padrão
 const port = Number(process.env.PORT) || 3333;
 
-app.listen({ port }, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
+// Iniciar servidor
+app.listen({ 
+  port,
+  host: '0.0.0.0'  // Adicione isso para aceitar conexões externas
+}, (err, address) => {
+  if (err) {
+    console.error('❌ ERRO ao iniciar servidor:', err);
+    process.exit(1);
+  }
+  
+  console.log(`🚀 Servidor iniciado em ${address}`);
+  console.log(`📚 Documentação: ${address}/docs`);
+  console.log(`🏥 Health check: ${address}/health`);
+  console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Mostrar variáveis carregadas (em desenvolvimento)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('\n📋 Variáveis de ambiente carregadas:');
+    console.log('   PORT:', process.env.PORT);
+    console.log('   JWT_SECRET:', '***');
+    console.log('   DATABASE_URL:', process.env.DATABASE_URL ? '*** (disponível)' : 'não definido');
+    console.log('   CORS_ORIGINS:', process.env.CORS_ORIGINS);
+  }
 });
