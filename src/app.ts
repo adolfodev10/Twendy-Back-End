@@ -1,64 +1,72 @@
 import Fastify from "fastify";
-import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
+import cors from "cors";
 import * as dotenv from "dotenv";
 
 import authRoutes from "./modules/auth/auth.routes";
 import usuarioRoutes from "./modules/usuarios/usuarios.routes";
 import servicoRoutes from "./modules/servicos/servicos.routes";
 
-// Carregar dotenv no app.ts também para garantir
+// Carregar dotenv
 dotenv.config();
 
-// Verificar JWT_SECRET aqui também como fallback
+// Verificar variáveis importantes
 if (!process.env.JWT_SECRET) {
-    console.error("❌ [app.ts] ERRO: JWT_SECRET não definido!");
-    // Não sair aqui, deixar o server.ts tratar
+    console.error("❌ ERRO: JWT_SECRET não definido no .env");
+    console.error("   Certifique-se de que o arquivo .env existe e tem JWT_SECRET");
+    process.exit(1);
 }
-
-// Converter CORS_ORIGINS de string para array
-const getCorsOrigins = () => {
-    if (process.env.CORS_ORIGINS) {
-        return process.env.CORS_ORIGINS.split(',').map(origin => origin.trim());
-    }
-    return ['http://localhost:5173', 'http://localhost:3000'];
-};
 
 const app = Fastify({
-    logger: {
-        level: (process.env.LOG_LEVEL as any) || 'info',
-        transport: {
-            target: 'pino-pretty',
-            options: {
-                translateTime: 'HH:MM:ss Z',
-                ignore: 'pid,hostname',
-            },
-        },
+    logger: true
+});
+
+// Configurar CORS
+const corsOptions = {
+    origin: process.env.CORS_ORIGINS 
+        ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
+        : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8080'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-Access-Token', 'X-API-Key']
+};
+
+// Middleware CORS para Fastify
+app.addHook('onRequest', (request, reply, done) => {
+    const origin = request.headers.origin;
+    
+    // Aplicar regras CORS
+    if (origin) {
+        const allowedOrigins = corsOptions.origin;
+        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+            reply.header('Access-Control-Allow-Origin', origin);
+            reply.header('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+            reply.header('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+            reply.header('Access-Control-Allow-Credentials', 'true');
+        }
     }
+    
+    // Preflight requests
+    if (request.method === 'OPTIONS') {
+        reply.status(204).send();
+        return;
+    }
+    
+    done();
 });
 
-// Registros de plugins
-app.register(cors, {
-    origin: getCorsOrigins(),
-    credentials: true
-});
-
-// Verificar JWT_SECRET antes de registrar
-const jwtSecret = process.env.JWT_SECRET || 'fallback_secret_development_only';
-if (jwtSecret === 'fallback_secret_development_only') {
-    console.warn('⚠️  Usando segredo JWT de fallback. Certifique-se de configurar JWT_SECRET no .env para produção!');
-}
-
+// Registrar JWT
 app.register(jwt, {
-    secret: jwtSecret
+    secret: process.env.JWT_SECRET
 });
 
+// Registrar multipart
 app.register(multipart, {
     limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB
+        fileSize: 10 * 1024 * 1024,
         files: 5
     }
 });
@@ -79,7 +87,7 @@ app.register(swagger, {
             bearerAuth: {
                 type: 'apiKey',
                 name: 'Authorization',
-                in: 'heade r',
+                in: 'header',
                 description: 'Insira o token JWT no formato: Bearer {token}'
             }
         }
@@ -94,7 +102,7 @@ app.register(swaggerUI, {
     }
 });
 
-// Rotas com prefixo baseado no API_VERSION
+// Rotas
 app.register(authRoutes, { prefix: `/auth` });
 app.register(usuarioRoutes, { prefix: `/usuarios` });
 app.register(servicoRoutes, { prefix: `/servicos` });
@@ -116,7 +124,7 @@ app.get('/', async () => {
         version: process.env.API_VERSION || '1.0.0',
         environment: process.env.NODE_ENV || 'development',
         docs: '/docs',
-        health: '/health',
+        health: '/health'
     };
 });
 
