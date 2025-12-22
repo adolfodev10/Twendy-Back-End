@@ -10,37 +10,26 @@ import authRoutes from "./modules/auth/auth.routes";
 import usuarioRoutes from "./modules/usuarios/usuarios.routes";
 import servicoRoutes from "./modules/servicos/servicos.routes";
 
-// Carregar variáveis de ambiente PRIMEIRO de forma explícita
-const envResult = dotenv.config();
+// Carregar dotenv no app.ts também para garantir
+dotenv.config();
 
-// Verificar se o dotenv carregou corretamente
-if (envResult.error) {
-  console.error("❌ ERRO ao carregar .env:", envResult.error);
-} else {
-  console.log("✅ .env carregado com sucesso");
-  console.log("📝 Variáveis carregadas:", Object.keys(envResult.parsed || {}).length);
-}
-
-// DEBUG: Verificar se JWT_SECRET está disponível
-console.log("🔍 Verificando JWT_SECRET no process.env:", process.env.JWT_SECRET ? "✅ Disponível" : "❌ NÃO encontrado");
-console.log("🔍 Verificando PORT:", process.env.PORT);
-
-// Verificar se JWT_SECRET está definido
+// Verificar JWT_SECRET aqui também como fallback
 if (!process.env.JWT_SECRET) {
-  console.error("❌ ERRO CRÍTICO: JWT_SECRET não está definido no arquivo .env");
-  console.error("   Verifique se o arquivo .env existe na raiz do projeto");
-  console.error("   Verifique se JWT_SECRET está definido no arquivo");
-  process.exit(1);
+  console.error("❌ [app.ts] ERRO: JWT_SECRET não definido!");
+  // Não sair aqui, deixar o server.ts tratar
 }
 
 // Converter CORS_ORIGINS de string para array
-const corsOrigins = process.env.CORS_ORIGINS 
-  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
-  : ['http://localhost:5173', 'http://localhost:3000'];
+const getCorsOrigins = () => {
+  if (process.env.CORS_ORIGINS) {
+    return process.env.CORS_ORIGINS.split(',').map(origin => origin.trim());
+  }
+  return ['http://localhost:5173', 'http://localhost:3000'];
+};
 
 const app = Fastify({ 
   logger: {
-    level: process.env.LOG_LEVEL as any || 'info',
+    level: (process.env.LOG_LEVEL as any) || 'info',
     transport: {
       target: 'pino-pretty',
       options: {
@@ -53,12 +42,18 @@ const app = Fastify({
 
 // Registros de plugins
 app.register(cors, {
-  origin: corsOrigins,
+  origin: getCorsOrigins(),
   credentials: true
 });
 
+// Verificar JWT_SECRET antes de registrar
+const jwtSecret = process.env.JWT_SECRET || 'fallback_secret_development_only';
+if (jwtSecret === 'fallback_secret_development_only') {
+  console.warn('⚠️  Usando segredo JWT de fallback. Certifique-se de configurar JWT_SECRET no .env para produção!');
+}
+
 app.register(jwt, { 
-  secret: process.env.JWT_SECRET 
+  secret: jwtSecret
 });
 
 app.register(multipart, {
@@ -96,22 +91,22 @@ app.register(swaggerUI, {
   uiConfig: {
     docExpansion: 'list',
     deepLinking: true
-  },
-  staticCSP: true
+  }
 });
 
-// Rotas
-app.register(authRoutes, { prefix: `/api/${process.env.API_VERSION || 'v1'}/auth` });
-app.register(usuarioRoutes, { prefix: `/api/${process.env.API_VERSION || 'v1'}/usuarios` });
-app.register(servicoRoutes, { prefix: `/api/${process.env.API_VERSION || 'v1'}/servicos` });
+// Rotas com prefixo baseado no API_VERSION
+const apiPrefix = `/api/${process.env.API_VERSION || 'v1'}`;
+app.register(authRoutes, { prefix: `${apiPrefix}/auth` });
+app.register(usuarioRoutes, { prefix: `${apiPrefix}/usuarios` });
+app.register(servicoRoutes, { prefix: `${apiPrefix}/servicos` });
 
 // Rota de saúde
 app.get('/health', async () => {
   return { 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    version: process.env.API_VERSION
+    environment: process.env.NODE_ENV || 'development',
+    version: process.env.API_VERSION || '1.0.0'
   };
 });
 
@@ -123,25 +118,8 @@ app.get('/', async () => {
     environment: process.env.NODE_ENV || 'development',
     docs: '/docs',
     health: '/health',
-    apiBase: `/api/${process.env.API_VERSION || 'v1'}`
+    apiBase: apiPrefix
   };
 });
-
-// Rota para ver variáveis de ambiente (apenas desenvolvimento)
-if (process.env.NODE_ENV === 'development') {
-  app.get('/env-check', async () => {
-    return {
-      loaded: !envResult.error,
-      error: envResult.error?.message,
-      variables: {
-        JWT_SECRET: process.env.JWT_SECRET ? '***' : 'MISSING',
-        PORT: process.env.PORT,
-        NODE_ENV: process.env.NODE_ENV,
-        CORS_ORIGINS: process.env.CORS_ORIGINS,
-        total: Object.keys(process.env).filter(k => k.includes('_')).length
-      }
-    };
-  });
-}
 
 export default app;
