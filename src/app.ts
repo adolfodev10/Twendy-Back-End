@@ -79,7 +79,7 @@ app.register(swagger, {
             bearerAuth: {
                 type: 'apiKey',
                 name: 'Authorization',
-                in: 'header',
+                in: 'heade r',
                 description: 'Insira o token JWT no formato: Bearer {token}'
             }
         }
