@@ -30,136 +30,212 @@ function initGoogleOAuth() {
 
 export default async function authRoutes(app: FastifyInstance) {
 
-   app.post("/google", async (req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { token } = req.body as any;
-
-      console.log("🔐 Iniciando autenticação Google OAuth2...");
-
-      // Verificar se o Google OAuth está configurado
-      if (!googleOAuthClient) {
-        console.error("❌ Google OAuth2 não configurado");
+  // Atualize a rota /google no backend
+app.post("/google", async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    console.log("=== 🔐 INÍCIO AUTENTICAÇÃO GOOGLE ===");
+    
+    // 1. EXTRAIR O TOKEN
+    const body = req.body as any;
+    console.log("📦 Body recebido. Campos:", Object.keys(body));
+    
+    const token = body.token || body.credential || body.tokenId || body.id_token;
+    console.log("🔑 Token extraído:", token ? "EXISTE" : "NÃO EXISTE");
+    
+    if (!token) {
+      console.error("❌ Token não encontrado no request");
+      return reply.status(400).send({ 
+        success: false,
+        message: "Token não fornecido",
+        hint: "Envie como: { token: 'seu_token_aqui' }",
+        receivedFields: Object.keys(body)
+      });
+    }
+    
+    console.log("📏 Comprimento do token:", token.length);
+    console.log("🔤 Primeiros 30 chars:", token.substring(0, 30) + "...");
+    
+    // 2. VERIFICAR/CONFIGURAR CLIENTE GOOGLE
+    if (!googleOAuthClient) {
+      console.log("🔄 Criando cliente OAuth2...");
+      const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+      
+      if (!CLIENT_ID) {
+        console.error("❌ GOOGLE_CLIENT_ID não definido no .env");
         return reply.status(500).send({ 
           success: false,
-          message: "Google OAuth não configurado no servidor. Verifique GOOGLE_CLIENT_ID no .env" 
+          message: "Configuração do servidor incompleta"
         });
       }
-
-      console.log("📨 Recebendo token Google para verificação...");
-
-      // Verificar o token com a Google
-      const ticket = await googleOAuthClient.verifyIdToken({
+      
+      console.log("✅ Client ID encontrado:", CLIENT_ID.substring(0, 30) + "...");
+      googleOAuthClient = new OAuth2Client(CLIENT_ID);
+      console.log("✅ Cliente OAuth2 inicializado");
+    }
+    
+    // 3. VERIFICAR TOKEN COM GOOGLE
+    console.log("🔍 Iniciando verificação do token...");
+    console.log("🎯 Audience (Client ID):", process.env.GOOGLE_CLIENT_ID);
+    
+    let ticket;
+    try {
+      ticket = await googleOAuthClient.verifyIdToken({
         idToken: token,
         audience: process.env.GOOGLE_CLIENT_ID
       });
-
-      const payload = ticket.getPayload();
-
-      if (!payload || !payload.email) {
-        console.error("❌ Token Google inválido ou sem email");
-        return reply.status(400).send({ 
-          success: false,
-          message: "Token Google inválido" 
-        });
-      }
-
-      console.log(`✅ Token Google válido para: ${payload.email}`);
-      console.log(`👤 Nome: ${payload.name || 'Não informado'}`);
-      console.log(`🆔 Google ID: ${payload.sub}`);
-
-      // Verificar se o usuário já existe
-      let user = await prisma.usuario.findUnique({
-        where: { email: payload.email },
-      });
-
-      // Se não existir, criar novo usuário
-      if (!user) {
-        console.log(`👤 Criando novo usuário para: ${payload.email}`);
-        
-        user = await prisma.usuario.create({
-          data: {
-            nome: payload.name || "Usuário Google",
-            email: payload.email,
-            BI: `GOOGLE_${payload.sub}`,
-            role: "CLIENTE",
-            // Campo adicional para armazenar Google ID
-            googleId: payload.sub
-          },
-        });
-        
-        console.log(`✅ Usuário criado: ${user.nome} (ID: ${user.id_usuario})`);
-      } else {
-        console.log(`✅ Usuário existente encontrado: ${user.nome}`);
-        
-        // Atualizar Google ID se não existir
-        if (!user.googleId) {
-          await prisma.usuario.update({
-            where: { id_usuario: user.id_usuario },
-            data: { googleId: payload.sub }
-          });
-          console.log(`✅ Google ID atualizado para usuário`);
-        }
-      }
-
-      // Gerar token JWT
-      const jwtToken = app.jwt.sign({
-        id: user.id_usuario,
-        email: user.email,
-        nome: user.nome,
-        BI: user.BI,
-        role: user.role,
-        googleId: payload.sub
-      });
-
-      console.log(`🔑 Token JWT gerado para: ${user.email}`);
-      console.log(`🎯 Role: ${user.role}`);
-
-      // Enviar resposta única (removida duplicação)
-      reply.send({
-        success: true,
-        message: "Login com Google realizado com sucesso",
-        token: jwtToken,
-        user: {
-          id_usuario: user.id_usuario,
-          nome: user.nome,
-          email: user.email,
-          BI: user.BI,
-          role: user.role,
-          googleId: payload.sub
-        }
-      });
-
-    } catch (error: any) {
-      console.error("❌ Erro no login com Google:", error);
+      console.log("✅ Token verificado com sucesso pelo Google");
+    } catch (googleError: any) {
+      console.error("❌ ERRO NA VERIFICAÇÃO DO TOKEN:");
+      console.error("   Mensagem:", googleError.message);
+      console.error("   Tipo:", googleError.constructor.name);
       
-      // Log detalhado para debug
-      if (error.message.includes('Token used too late')) {
-        console.error("⚠️  Token expirado");
-        reply.status(400).send({ 
-          success: false,
-          message: "Token expirado. Por favor, tente novamente." 
-        });
-      } else if (error.message.includes('Wrong number of segments')) {
-        console.error("⚠️  Token mal formatado");
-        reply.status(400).send({ 
-          success: false,
-          message: "Token inválido. Formato incorreto." 
-        });
-      } else if (error.message.includes('Invalid token signature')) {
-        console.error("⚠️  Assinatura inválida");
-        reply.status(400).send({ 
-          success: false,
-          message: "Token inválido. Assinatura incorreta." 
-        });
-      } else {
-        reply.status(500).send({ 
-          success: false,
-          message: "Erro ao fazer login com Google",
-          error: error.message 
+      // Erros comuns do Google
+      if (googleError.message.includes('Wrong number of segments')) {
+        console.error("   ❌ Token malformado (formato JWT inválido)");
+      } else if (googleError.message.includes('Token used too late')) {
+        console.error("   ❌ Token expirado");
+      } else if (googleError.message.includes('Invalid token signature')) {
+        console.error("   ❌ Assinatura inválida");
+      } else if (googleError.message.includes('Audience mismatch')) {
+        console.error("   ❌ Client ID incorreto");
+      }
+      
+      return reply.status(400).send({ 
+        success: false,
+        message: "Token Google inválido",
+        error: googleError.message,
+        hint: "Verifique: 1) Token correto 2) Client ID correto 3) Token não expirado"
+      });
+    }
+    
+    // 4. EXTRAIR DADOS DO PAYLOAD
+    const payload = ticket.getPayload();
+    
+    if (!payload) {
+      console.error("❌ Payload do token vazio");
+      return reply.status(400).send({ 
+        success: false,
+        message: "Token Google sem dados"
+      });
+    }
+    
+    if (!payload.email) {
+      console.error("❌ Token não contém email");
+      return reply.status(400).send({ 
+        success: false,
+        message: "Token Google sem email"
+      });
+    }
+    
+    console.log("✅ Dados extraídos do token:");
+    console.log("   📧 Email:", payload.email);
+    console.log("   👤 Nome:", payload.name || "Não informado");
+    console.log("   🆔 Google ID:", payload.sub);
+    console.log("   ✅ Email verificado:", payload.email_verified);
+    console.log("   🖼️  Foto:", payload.picture || "Não tem");
+    
+    // 5. VERIFICAR/CRIAR USUÁRIO NO BANCO
+    console.log("🔍 Buscando usuário no banco...");
+    let user = await prisma.usuario.findUnique({
+      where: { email: payload.email },
+    });
+    
+    if (!user) {
+      console.log("👤 Criando novo usuário...");
+      
+      // Preparar dados para criação
+      const userData: any = {
+        nome: payload.name || "Usuário Google",
+        email: payload.email,
+        BI: `GOOGLE_${payload.sub}`,
+        role: "CLIENTE"
+      };
+      
+      // Adicionar googleId se a coluna existir
+      try {
+        // Verifica se o modelo Prisma tem campo googleId
+        userData.googleId = payload.sub;
+      } catch (error) {
+        console.log("ℹ️  Coluna googleId não disponível");
+      }
+      
+      user = await prisma.usuario.create({
+        data: userData,
+      });
+      
+      console.log("✅ Usuário criado:", user.nome, "(ID:", user.id_usuario + ")");
+    } else {
+      console.log("✅ Usuário existente:", user.nome, "(ID:", user.id_usuario + ")");
+      
+      // Atualizar googleId se necessário
+      if (user.googleId !== payload.sub) {
+        console.log("🔄 Atualizando googleId...");
+        await prisma.usuario.update({
+          where: { id_usuario: user.id_usuario },
+          data: { googleId: payload.sub }
+        }).catch(err => {
+          console.log("ℹ️  Não foi possível atualizar googleId:", err.message);
         });
       }
     }
-  });
+    
+    // 6. GERAR JWT
+    console.log("🔑 Gerando token JWT...");
+    const jwtToken = app.jwt.sign({
+      id: user.id_usuario,
+      email: user.email,
+      nome: user.nome,
+      BI: user.BI,
+      role: user.role,
+      googleId: payload.sub
+    }, {
+      expiresIn: "7d"
+    });
+    
+    console.log("✅ Token JWT gerado");
+    console.log("🎯 Role do usuário:", user.role);
+    
+    // 7. ENVIAR RESPOSTA
+    console.log("📤 Enviando resposta ao frontend...");
+    reply.send({
+      success: true,
+      message: "Login com Google realizado com sucesso",
+      token: jwtToken,
+      user: {
+        id_usuario: user.id_usuario,
+        nome: user.nome,
+        email: user.email,
+        BI: user.BI,
+        role: user.role,
+        googleId: payload.sub
+      }
+    });
+    
+    console.log("=== ✅ AUTENTICAÇÃO GOOGLE CONCLUÍDA ===");
+    
+  } catch (error: any) {
+    console.error("❌ ERRO CRÍTICO NO LOGIN COM GOOGLE:");
+    console.error("   Mensagem:", error.message);
+    console.error("   Stack:", error.stack);
+    console.error("   Tipo:", error.constructor.name);
+    
+    // Erros específicos do Prisma
+    if (error.code === 'P2002') {
+      console.error("   ❌ Erro de duplicidade no banco");
+      return reply.status(400).send({ 
+        success: false,
+        message: "Email já cadastrado no sistema"
+      });
+    }
+    
+    // Erro geral
+    reply.status(500).send({ 
+      success: false,
+      message: "Erro interno no servidor",
+      error: error.message
+    });
+  }
+});
 
 
 
